@@ -729,7 +729,7 @@ blockquote{margin:0; font-size:1.25rem; line-height:1.6; font-weight:500; max-wi
 (function(){
   /* =====================================================================
      ★ 선생님 설정
-     APPS_SCRIPT_URL : "https://script.google.com/macros/s/AKfycbybvYLqo4ikdjhGbtIJSLpwyzC6gVAcYMJfRAcPGls6321B3z6n1zYhht36QWngRjMdRg/exec"
+     APPS_SCRIPT_URL : Apps Script 웹 앱 주소 (https://script.google.com/macros/s/.../exec)
                        비워 두면 챗봇과 '선생님께 보내기'가 꺼집니다.
                        (claude.ai 미리보기에서는 선생님 Claude 계정으로 챗봇이 작동합니다.)
      POLISH_ON       : 영어 답 '문장 다듬기' 버튼 켜기(true) / 끄기(false)
@@ -740,7 +740,7 @@ blockquote{margin:0; font-size:1.25rem; line-height:1.6; font-weight:500; max-wi
     APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbybvYLqo4ikdjhGbtIJSLpwyzC6gVAcYMJfRAcPGls6321B3z6n1zYhht36QWngRjMdRg/exec",
     POLISH_ON: true,          // '문장 다듬기' 버튼 (수행평가 때는 false)
     KRW_PER_USD: 1400,
-    RATE_DATE: "수업 전에 확인"
+    RATE_DATE: "2026.10.26 기준"
   };
 
   /* ---------- storage ---------- */
@@ -876,11 +876,14 @@ blockquote{margin:0; font-size:1.25rem; line-height:1.6; font-weight:500; max-wi
 
   /* ---------- photo slots: images/<id>.jpg ---------- */
   function tryImg(target, id, onOk, onFail){
-    const exts = ['jpg','png']; let i = 0;
+    // images/ 폴더 안 또는 저장소 맨 위, jpg·jpeg·png(대소문자) 모두 찾기
+    const tries = [];
+    ['images/',''].forEach(dir=> ['jpg','jpeg','png','JPG','JPEG','PNG'].forEach(x=> tries.push(dir + id + '.' + x)));
+    let i = 0;
     const img = new Image();
     img.onload = ()=> onOk(img);
-    img.onerror = ()=>{ i++; if(i < exts.length) img.src = 'images/' + id + '.' + exts[i]; else onFail(); };
-    img.src = 'images/' + id + '.' + exts[0];
+    img.onerror = ()=>{ i++; if(i < tries.length) img.src = tries[i]; else onFail(); };
+    img.src = tries[0];
   }
   document.querySelectorAll('.slot[data-slot]').forEach(s=>{
     const id = s.dataset.slot, label = s.dataset.label;
@@ -1238,9 +1241,12 @@ blockquote{margin:0; font-size:1.25rem; line-height:1.6; font-weight:500; max-wi
   const PREVIEW_POLISH = 'You help a Korean middle school student (age 15) improve ONE English answer. Keep the student’s idea; do not add new ideas or answer for them. "corrected": the same sentence with only grammar/spelling fixed (same text if already correct). "paraphrase": a natural, easy (CEFR A2-B1) way to say the same idea, 1-2 sentences. "tip_ko": one short Korean sentence explaining the main change or praising. If the answer is in Korean, set corrected to "" and give an English version in paraphrase, and in tip_ko ask the student to type it again in their own words. Reply with ONLY JSON: {"input_lang":"ko|en","corrected":"...","paraphrase":"...","tip_ko":"..."}';
   async function callPolish(question, text){
     if(CONFIG.APPS_SCRIPT_URL){
-      const res = await fetch(CONFIG.APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body: JSON.stringify({action:'polish', sid: USER ? USER.sid : '', name: USER ? USER.name : '', question, text}) });
-      const j = await res.json();
+      let j;
+      try{
+        const res = await fetch(CONFIG.APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+          body: JSON.stringify({action:'polish', sid: USER ? USER.sid : '', name: USER ? USER.name : '', question, text}) });
+        j = await res.json();
+      }catch(err){ throw {code:'network'}; }
       if(!j.ok) throw {code: j.error || 'server'};
       return j.data;
     }
@@ -1248,7 +1254,10 @@ blockquote{margin:0; font-size:1.25rem; line-height:1.6; font-weight:500; max-wi
     if(!sample) throw {code:'offline'};
     return await sample.json(PREVIEW_POLISH + '\n\nQuestion: ' + question + '\n<answer>' + text + '</answer>', {modelTier:'quick', cache:false});
   }
-  const PERR = { limit:'오늘 다듬기 횟수를 다 썼어요.', offline:'선생님이 서버를 연결하면 쓸 수 있어요.', too_long:'답이 너무 길어요. 400자 안으로 줄여 주세요.', bad_sid:'학번을 먼저 입력해 주세요.' };
+  const PERR = { limit:'오늘 다듬기 횟수를 다 썼어요.', offline:'선생님이 서버를 연결하면 쓸 수 있어요.', too_long:'답이 너무 길어요. 400자 안으로 줄여 주세요.', bad_sid:'학번을 먼저 입력해 주세요.',
+    busy_day:'오늘 학급 전체 사용 수가 다 찼어요.', rate_limited:'요청이 많아요. 잠시 후 다시 눌러 주세요.',
+    unknown_action:'선생님: Apps Script를 새 Code.gs로 바꾸고 「새 버전」으로 다시 배포해 주세요.',
+    network:'선생님: 서버 주소에 연결하지 못했어요. 배포 주소(/exec)와 「모든 사용자」 권한을 확인해 주세요.' };
   if(CONFIG.POLISH_ON){
     document.querySelectorAll('textarea[data-polish]').forEach(t=>{
       const wrap = el('div'); wrap.style.display = 'grid'; wrap.style.gap = '10px';
@@ -1278,7 +1287,11 @@ blockquote{margin:0; font-size:1.25rem; line-height:1.6; font-weight:500; max-wi
           addOpt('Paraphrase · 더 자연스럽게', d && d.paraphrase);
           if(d && d.tip_ko) box.appendChild(el('p','pk', d.tip_ko));
           out.appendChild(box);
-        }catch(e){ out.textContent = PERR[e && e.code] || '다듬지 못했어요. 다시 눌러 주세요.'; }
+        }catch(e){
+          const code = (e && e.code) || 'network';
+          out.textContent = PERR[code] || '다듬지 못했어요. 다시 눌러 주세요.';
+          const c = el('small', null, ' (오류: ' + code + ')'); c.style.color = '#8a8a8e'; out.appendChild(c);
+        }
         finally{ btn.disabled = false; btn.textContent = '✍️ 문장 다듬기'; }
       });
     });
